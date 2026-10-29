@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>중간고사 시험지 확인</title>
+<style>
+  :root { --bg:#f5f5f2; --card:#fff; --ink:#1d1d1b; --muted:#6b6b66; --line:#dcdcd6; --accent:#1f4e8c; --err:#b3261e; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg:#161615; --card:#222220; --ink:#ececea; --muted:#a3a39d; --line:#3a3a37; --accent:#5b8fd6; --err:#f2948c; }
+  }
+  :root[data-theme="dark"] { --bg:#161615; --card:#222220; --ink:#ececea; --muted:#a3a39d; --line:#3a3a37; --accent:#5b8fd6; --err:#f2948c; }
+  input { background:var(--card); color:var(--ink); }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",sans-serif; }
+  main { max-width:900px; margin:0 auto; padding:24px 16px 48px; }
+  h1 { font-size:20px; margin:8px 0 4px; }
+  .sub { color:var(--muted); font-size:14px; margin:0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:20px; }
+  label { display:block; font-size:14px; font-weight:600; margin:0 0 6px; }
+  input { width:100%; font-size:18px; padding:12px; border:1px solid var(--line); border-radius:8px; margin-bottom:14px; }
+  button { width:100%; font-size:17px; font-weight:600; padding:14px; border:0; border-radius:8px; background:var(--accent); color:#fff; }
+  button:disabled { opacity:.6; }
+  .msg { min-height:20px; font-size:14px; margin-top:12px; color:var(--err); }
+  .warn { font-size:13px; color:var(--muted); margin-top:16px; line-height:1.5; }
+  .who { font-size:15px; margin-bottom:12px; }
+  .pages img { display:block; width:100%; height:auto; background:#fff; border:1px solid var(--line); margin-bottom:12px; }
+  .center { text-align:center; padding:48px 16px; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+
+<main id="app">
+  <h1>2026-2학기 감각검사실험 중간고사</h1>
+  <p class="sub">본인 시험지 확인</p>
+
+  <section id="login" class="card" hidden>
+    <form id="form" autocomplete="off">
+      <label for="sid">학번</label>
+      <input id="sid" inputmode="numeric" pattern="[0-9]*" maxlength="8" placeholder="예: 20261234" required>
+      <label for="sname">이름</label>
+      <input id="sname" placeholder="예: 홍길동" required>
+      <button id="go" type="submit">시험지 보기</button>
+      <div class="msg" id="msg"></div>
+    </form>
+    <p class="warn">※ 본인 학번과 이름만 입력하세요. 한 번 열면 이 기기에서는 본인 시험지만 볼 수 있습니다.</p>
+  </section>
+
+  <section id="view" hidden>
+    <div class="who" id="who"></div>
+    <div class="pages" id="pages"></div>
+  </section>
+
+  <section id="status" class="card center" hidden></section>
+</main>
+
+<script>
+const LOCK_KEY = "exam-2026-2-mid-lock";
+const ITER = 150000;
+const $ = id => document.getElementById(id);
+const norm = s => s.normalize("NFC").replace(/\s+/g, "");
+
+function show(id) { for (const s of ["login", "view", "status"]) $(s).hidden = s !== id; }
+function status(text) { $("status").textContent = text; show("status"); }
+
+function readLock() { try { return JSON.parse(localStorage.getItem(LOCK_KEY)); } catch { return null; } }
+function writeLock(v) { try { localStorage.setItem(LOCK_KEY, JSON.stringify(v)); } catch {} }
+
+async function sha256hex(bytes) {
+  const h = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return [...h].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+
+// 결과: {ok:true,data} | {ok:false, reason:"nomatch"|"network"}
+async function fetchExam(sid, name) {
+  const secret = new TextEncoder().encode(`${sid}|${norm(name)}`);
+  const prefix = new TextEncoder().encode("exam-2026-2-mid|");
+  const fname = (await sha256hex(new Uint8Array([...prefix, ...secret]))).slice(0, 32);
+  let res;
+  try { res = await fetch(`d/${fname}.txt`, { cache: "no-store" }); }
+  catch { return { ok: false, reason: "network" }; }
+  if (res.status >= 400 && res.status < 500) return { ok: false, reason: "nomatch" };
+  if (!res.ok) return { ok: false, reason: "network" };
+  let buf;
+  try { buf = Uint8Array.from(atob((await res.text()).trim()), c => c.charCodeAt(0)); }
+  catch { return { ok: false, reason: "nomatch" }; }
+  if (buf.length < 29) return { ok: false, reason: "nomatch" };
+  const salt = buf.slice(0, 16), iv = buf.slice(16, 28), ct = buf.slice(28);
+  const base = await crypto.subtle.importKey("raw", secret, "PBKDF2", false, ["deriveKey"]);
+  const key = await crypto.subtle.deriveKey(
+    { name: "PBKDF2", hash: "SHA-256", salt, iterations: ITER },
+    base, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+  try {
+    const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, ct);
+    return { ok: true, data: JSON.parse(new TextDecoder().decode(pt)) };
+  } catch { return { ok: false, reason: "nomatch" }; }
+}
+
+function render(data) {
+  $("who").textContent = `${data.id} ${data.name}`;
+  const box = $("pages");
+  box.replaceChildren();
+  data.pages.forEach((b64, i) => {
+    const img = new Image();
+    img.alt = `${i + 1}쪽`;
+    img.src = "data:image/jpeg;base64," + b64;
+    box.append(img);
+  });
+  show("view");
+}
+
+async function openLocked(lock) {
+  status("불러오는 중…");
+  const r = await fetchExam(lock.id, lock.name);
+  if (r.ok) render(r.data);
+  else if (r.reason === "nomatch") status("시험지 열람 기간이 종료되었습니다.");
+  else status("연결이 원활하지 않습니다. 잠시 후 다시 열어 주세요.");
+}
+
+$("form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const sid = $("sid").value.replace(/\D/g, "");
+  const name = norm($("sname").value);
+  if (sid.length !== 8 || !name) { $("msg").textContent = "학번 8자리와 이름을 정확히 입력하세요."; return; }
+  $("go").disabled = true; $("msg").textContent = "";
+  $("go").textContent = "확인 중…";
+  const r = await fetchExam(sid, name);
+  $("go").disabled = false; $("go").textContent = "시험지 보기";
+  if (r.ok) { writeLock({ id: sid, name }); render(r.data); }
+  else if (r.reason === "nomatch") $("msg").textContent = "일치하는 시험지가 없습니다. 학번과 이름을 확인하세요. 계속 안 되면 교수님께 문의하세요.";
+  else $("msg").textContent = "연결이 원활하지 않습니다. 잠시 후 다시 시도하세요.";
+});
+
+const lock = readLock();
+if (lock && lock.id && lock.name) openLocked(lock);
+else show("login");
+</script>
+</body>
+</html>
