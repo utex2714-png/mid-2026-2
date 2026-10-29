@@ -25,6 +25,9 @@
   .msg { min-height:20px; font-size:14px; margin-top:12px; color:var(--err); }
   .warn { font-size:13px; color:var(--muted); margin-top:16px; line-height:1.5; }
   .who { font-size:15px; margin-bottom:12px; }
+  .scorebox { margin-bottom:16px; padding:16px 20px; }
+  .score { font-size:32px; font-weight:700; color:var(--accent); }
+  .score-note { font-size:15px; color:var(--muted); }
   .pages img { display:block; width:100%; height:auto; background:#fff; border:1px solid var(--line); margin-bottom:12px; }
   .center { text-align:center; padding:48px 16px; }
   [hidden] { display:none !important; }
@@ -50,6 +53,7 @@
 
   <section id="view" hidden>
     <div class="who" id="who"></div>
+    <div class="card scorebox"><span class="score" id="score"></span> <span class="score-note" id="score-note"></span></div>
     <div class="pages" id="pages"></div>
   </section>
 
@@ -100,6 +104,8 @@ async function fetchExam(sid, name) {
 
 function render(data) {
   $("who").textContent = `${data.id} ${data.name}`;
+  $("score").textContent = data.absent ? "결시" : `${data.score}점`;
+  $("score-note").textContent = data.absent ? "결시 처리되었습니다. 문의 사항은 교수님께 연락하세요." : "/ 100점";
   const box = $("pages");
   box.replaceChildren();
   data.pages.forEach((b64, i) => {
